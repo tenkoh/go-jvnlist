@@ -1,11 +1,11 @@
-package main_test
+package jvnlist_test
 
 import (
 	"reflect"
 	"strings"
 	"testing"
 
-	jvnlist "github.com/tenkoh/go-jvnlist"
+	"github.com/tenkoh/go-jvnlist"
 )
 
 const headlines = `<html>
