@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -40,18 +41,29 @@ func (c *ClientWithInterval) Do(req *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
+type HeadlineMap map[int][]*Headline
+
 type Headline struct {
 	Title string
 	Link  string
 }
 
-func ParseHeadlines(r io.Reader) ([]*Headline, error) {
+func ParseHeadlines(r io.Reader) (HeadlineMap, error) {
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		return nil, err
 	}
-	var headlines []*Headline
+	hm := HeadlineMap{}
 	doc.Find(".listbox").Each(func(i int, s *goquery.Selection) {
+		ys := s.Find("h2").Text()
+		if len(ys) < 4 {
+			return
+		}
+		y, err := strconv.Atoi(ys[:4])
+		if err != nil {
+			return
+		}
+		var headlines []*Headline
 		s.Find("dl").Each(func(j int, dl *goquery.Selection) {
 			title := dl.Find("dt").Text()
 			link, exist := dl.Find("a").Attr("href")
@@ -60,8 +72,9 @@ func ParseHeadlines(r io.Reader) ([]*Headline, error) {
 			}
 			headlines = append(headlines, &Headline{title, link})
 		})
+		hm[y] = headlines
 	})
-	return headlines, nil
+	return hm, nil
 }
 
 func main() {
