@@ -2,6 +2,7 @@ package jvnlist
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -19,19 +20,21 @@ type Headline struct {
 }
 
 type Detail struct {
-	Link        string `json:"link"`
-	Code        string `json:"code"`
-	Title       string `json:"title"`
-	Abstract    string `json:"abstract"`
-	Target      string `json:"target"`
-	Detail      string `json:"detail"`
-	Impact      string `json:"impact"`
-	Measure     string `json:"measure"`
-	Vendor      string `json:"vendor"`
-	Information string `json:"information"`
-	Supplement  string `json:"supplement"`
-	Analysis    string `json:"analysis"`
-	Reference   string `json:"reference"`
+	PublishedAt time.Time `json:"published_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Link        string    `json:"link"`
+	Code        string    `json:"code"`
+	Title       string    `json:"title"`
+	Abstract    string    `json:"abstract"`
+	Target      string    `json:"target"`
+	Detail      string    `json:"detail"`
+	Impact      string    `json:"impact"`
+	Measure     string    `json:"measure"`
+	Vendor      string    `json:"vendor"`
+	Information string    `json:"information"`
+	Supplement  string    `json:"supplement"`
+	Analysis    string    `json:"analysis"`
+	Reference   string    `json:"reference"`
 }
 
 func ParseHeadlines(r io.Reader) ([]*Headline, error) {
@@ -68,6 +71,12 @@ func ParseDetail(r io.Reader) (*Detail, error) {
 		return nil, err
 	}
 	detail := new(Detail)
+	published, updated, err := parseDate(doc)
+	if err != nil {
+		return nil, err
+	}
+	detail.PublishedAt = published
+	detail.UpdatedAt = updated
 	title, code, err := parseTitle(doc.Find("h1"))
 	if err != nil {
 		return nil, err
@@ -113,6 +122,27 @@ func ParseDetail(r io.Reader) (*Detail, error) {
 		}
 	})
 	return detail, nil
+}
+
+func parseDate(doc *goquery.Document) (published, updated time.Time, err error) {
+	raw := doc.Find("#head-bar-txt").Text()
+	dates := strings.Split(raw, "　")
+	if len(dates) != 2 {
+		err = errors.New("could not parse published and updated dates")
+		return
+	}
+	published, err = time.Parse("公開日：2006/01/02", dates[0])
+	if err != nil {
+		err = fmt.Errorf("could not parse published date: %w", err)
+		return
+	}
+	updated, err = time.Parse("最終更新日：2006/01/02", dates[1])
+	if err != nil {
+		err = fmt.Errorf("could not parse updated date: %w", err)
+		return
+	}
+	err = nil
+	return
 }
 
 func parseVendor(s *goquery.Selection) (string, error) {

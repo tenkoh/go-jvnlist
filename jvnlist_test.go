@@ -54,7 +54,10 @@ func TestParseDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	d, _ := time.Parse("2006/01/02", "2022/01/01")
 	want := &jvnlist.Detail{
+		PublishedAt: d,
+		UpdatedAt:   d,
 		Code:        "JVNVU#000000",
 		Title:       "report some problem",
 		Abstract:    "There are some problems on a system",

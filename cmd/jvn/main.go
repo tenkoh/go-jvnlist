@@ -15,15 +15,12 @@ import (
 	"github.com/tenkoh/go-jvnlist"
 )
 
-// todo
-// 引数なし: listを更新、差分を取得
-// 引数あり：listを更新、指定年を取得
-
 const (
-	crawlTimeout  = 10
-	crawlInterval = 1
-	jvnEndpoint   = "https://jvn.jp"
-	listPath      = "report/all.html"
+	crawlTimeout      = 10
+	crawlInterval     = 1
+	crawlDefaultLimit = 50
+	jvnEndpoint       = "https://jvn.jp"
+	listPath          = "report/all.html"
 )
 
 var client = &http.Client{
@@ -53,108 +50,93 @@ func getList() ([]*jvnlist.Headline, error) {
 	return headlines, nil
 }
 
-func main() {
-	var year int
-	flag.IntVar(&year, "y", 0, "specify the year")
-	flag.Parse()
-
+func loadRecordedDetails() ([]*jvnlist.Detail, error) {
 	f, err := os.OpenFile("jvnlist.json", os.O_CREATE|os.O_RDWR, 0775)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer f.Close()
 
-	recorded := []*jvnlist.Headline{}
+	recorded := []*jvnlist.Detail{}
 	if err := json.NewDecoder(f).Decode(&recorded); err != nil && err != io.EOF {
+		return nil, err
+	}
+	return recorded, nil
+}
+
+func main() {
+	limit := crawlDefaultLimit
+	flag.IntVar(&limit, "l", crawlDefaultLimit, "set limit num to get details")
+	flag.Parse()
+
+	recorded, err := loadRecordedDetails()
+	if err != nil {
 		log.Fatal(err)
 	}
 
 	got, err := getList()
 	if err != nil {
-		panic(err)
-	}
-	if err := json.NewEncoder(f).Encode(got); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	hmap := map[string]struct{}{}
-	for _, h := range recorded {
-		hmap[h.Link] = struct{}{}
-	}
-	var added []*jvnlist.Headline
-	for _, h := range got {
-		_, exist := hmap[h.Link]
-		if !exist {
-			added = append(added, h)
-		}
-	}
-
-	// if year is not specified, default action is UPDATE
-	if year == 0 {
-		if len(added) > 300 {
-			log.Fatalln("there are so many added jvn records. please try to specify the year in which you want to get records")
-		}
-		got = added
-	}
-
-	bar := pb.StartNew(len(got))
-	defer bar.Finish()
-	var details []*jvnlist.Detail
-	for _, h := range got {
-		bar.Increment()
-		if year != 0 {
-			if h.PublishedAt.Year() != year {
-				continue
-			}
-		}
-		u, err := url.Parse(jvnEndpoint)
+	for _, r := range recorded {
+		// fit url style to headlines (only path)
+		u, err := url.Parse(r.Link)
 		if err != nil {
-			log.Printf("error in %s: %s\n", u.String(), err.Error())
 			continue
 		}
+		hmap[u.Path] = struct{}{}
+	}
+	updates := make([]*jvnlist.Headline, 0, len(got))
+	for _, h := range got {
+		_, exist := hmap[path.Clean(h.Link)]
+		if !exist {
+			updates = append(updates, h)
+		}
+	}
+	log.Printf("[INFO] %d updates are found", len(updates))
+	if len(updates) > limit {
+
+		log.Printf("[WARN] updates are more than the limit. %d details are recorded. please try giving an argumen '-l [limit int]' to change the limit", limit)
+		updates = updates[:limit]
+	}
+
+	bar := pb.StartNew(len(updates))
+	defer bar.Finish()
+	details := make([]*jvnlist.Detail, len(updates))
+	for i, h := range updates {
+		bar.Increment()
+		u, _ := url.Parse(jvnEndpoint)
 		u.Path = path.Join(u.Path, h.Link)
 		req, err := http.NewRequest("GET", u.String(), nil)
 		if err != nil {
-			log.Printf("error in %s: %s\n", u.String(), err.Error())
+			log.Printf("[ERROR] %s: %s\n", u.String(), err.Error())
 			continue
 		}
 		time.Sleep(crawlInterval * time.Second)
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("error in %s: %s\n", u.String(), err.Error())
+			log.Printf("[ERROR] %s: %s\n", u.String(), err.Error())
 			continue
 		}
 		defer resp.Body.Close()
 		d, err := jvnlist.ParseDetail(resp.Body)
 		if err != nil {
-			log.Printf("error in %s: %s\n", u.String(), err.Error())
+			log.Printf("[ERROR] %s: %s\n", u.String(), err.Error())
 			continue
 		}
 		d.Link = u.String()
-		details = append(details, d)
+		details[i] = d
 	}
 
-	g, err := os.OpenFile("jvn_details.json", os.O_CREATE|os.O_RDWR, 0775)
+	recorded = append(recorded, details...)
+	f, err := os.Create("jvnlist.json")
 	if err != nil {
-		panic(err)
-	}
-	defer g.Close()
-
-	ed := []*jvnlist.Detail{}
-	if err := json.NewDecoder(g).Decode(&ed); err != nil && err != io.EOF {
 		log.Fatal(err)
 	}
-	dmap := map[string]struct{}{}
-	for _, d := range ed {
-		dmap[d.Link] = struct{}{}
-	}
-	for _, d := range details {
-		_, exist := dmap[d.Link]
-		if !exist {
-			ed = append(ed, d)
-		}
-	}
-	if err := json.NewEncoder(g).Encode(ed); err != nil {
-		panic(err)
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(recorded); err != nil {
+		log.Fatal("[ERROR] fail to save jvn details into a file")
 	}
 }
